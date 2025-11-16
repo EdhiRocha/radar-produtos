@@ -6,7 +6,7 @@ import type {
   PaginatedProducts,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {

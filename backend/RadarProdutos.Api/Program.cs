@@ -95,4 +95,8 @@ app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader())
 
 app.MapControllers();
 
+// Garantir que sempre use a porta 5001
+app.Urls.Clear();
+app.Urls.Add("http://localhost:5001");
+
 app.Run();
