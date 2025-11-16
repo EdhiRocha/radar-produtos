@@ -20,8 +20,31 @@ namespace RadarProdutos.Infrastructure.Repositories
 
         public async Task AddRangeAsync(IEnumerable<Product> products)
         {
-            await _db.Products.AddRangeAsync(products);
-            await _db.SaveChangesAsync();
+            var productsList = products.ToList();
+
+            // Verifica quais produtos já existem no banco (por ExternalId para evitar duplicatas)
+            var externalIds = productsList.Select(p => p.ExternalId).Distinct().ToList();
+            var existingExternalIds = await _db.Products
+                .Where(p => externalIds.Contains(p.ExternalId))
+                .Select(p => p.ExternalId)
+                .ToListAsync();
+
+            // Filtra apenas produtos que não existem
+            var newProducts = productsList
+                .Where(p => !existingExternalIds.Contains(p.ExternalId))
+                .ToList();
+
+            if (newProducts.Any())
+            {
+                await _db.Products.AddRangeAsync(newProducts);
+                await _db.SaveChangesAsync();
+
+                Console.WriteLine($"✅ {newProducts.Count} novos produtos salvos no banco");
+            }
+            else
+            {
+                Console.WriteLine($"ℹ️ Nenhum produto novo para salvar (todos já existem)");
+            }
         }
 
         public async Task<Product?> GetByIdAsync(Guid id)

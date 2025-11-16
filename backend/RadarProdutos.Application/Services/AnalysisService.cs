@@ -52,16 +52,43 @@ namespace RadarProdutos.Application.Services
 
             var analysis = new ProductAnalysis { Id = Guid.NewGuid(), Keyword = request.Keyword, CreatedAt = DateTime.UtcNow };
 
+            // Busca agregada de competição/engajamento usando a keyword original
+            // Isso faz apenas 2 chamadas extras em vez de 40+
+            CompetitionInfoDto? competitionInfo = null;
+            EngagementInfoDto? engagementInfo = null;
+
+            try
+            {
+                // TODO: Mover para background job no futuro
+                var competitionTask = _scraper.GetCompetitionInfoAsync(request.Keyword);
+                var engagementTask = _scraper.GetEngagementInfoAsync(request.Keyword);
+
+                await Task.WhenAll(competitionTask, engagementTask);
+
+                competitionInfo = await competitionTask;
+                engagementInfo = await engagementTask;
+
+                Console.WriteLine($"📊 Competição: {competitionInfo?.TotalCompetitors} competidores, preço médio: {competitionInfo?.AveragePrice:C2}");
+                Console.WriteLine($"📈 Engajamento: Volume {engagementInfo?.SearchVolume}, TrendScore: {engagementInfo?.TrendScore}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️  Erro ao buscar métricas agregadas: {ex.Message}. Usando valores padrão.");
+            }
+
             var products = new List<Product>();
 
             foreach (var sp in scraped.Take(50))
             {
-                var competition = await _scraper.GetCompetitionInfoAsync(sp.Name);
-                var engagement = await _scraper.GetEngagementInfoAsync(sp.Name);
-
                 // simple estimation of sale price
                 var estimated = sp.SupplierPrice * 1.5m;
                 var margin = estimated <= 0 ? 0 : (estimated - sp.SupplierPrice) / estimated * 100m;
+
+                // Determinar competição baseado nos dados agregados + dados do produto
+                var competitionLevel = DetermineCompetitionLevel(sp, competitionInfo);
+
+                // Determinar sentimento baseado no rating do produto e engajamento geral
+                var sentiment = DetermineSentiment(sp, engagementInfo);
 
                 var product = new Product
                 {
@@ -75,13 +102,13 @@ namespace RadarProdutos.Application.Services
                     MarginPercent = decimal.Round(margin, 2),
                     Rating = sp.Rating,
                     Orders = sp.Orders,
-                    CompetitionLevel = competition?.CompetitionLevel ?? "Media",
-                    Sentiment = engagement?.Sentiment ?? "Misto",
+                    CompetitionLevel = competitionLevel,
+                    Sentiment = sentiment,
                     CreatedAt = DateTime.UtcNow,
                     ProductAnalysisId = analysis.Id
                 };
 
-                product.Score = ProductScoreCalculator.CalculateScore(product, config, competition, engagement);
+                product.Score = ProductScoreCalculator.CalculateScore(product, config, competitionInfo, engagementInfo);
 
                 products.Add(product);
             }
@@ -140,6 +167,61 @@ namespace RadarProdutos.Application.Services
             };
 
             return dto;
+        }
+
+        private static string DetermineCompetitionLevel(ScrapedProductDto product, CompetitionInfoDto? competitionInfo)
+        {
+            // Se não tem dados de competição, usa apenas vendas do produto
+            if (competitionInfo == null || competitionInfo.TotalCompetitors == 0)
+            {
+                return product.Orders switch
+                {
+                    > 5000 => "Alta",
+                    > 1000 => "Media",
+                    _ => "Baixa"
+                };
+            }
+
+            // Com dados de competição: considera número de competidores e top sellers
+            var hasHighCompetition = competitionInfo.TotalCompetitors > 15 || competitionInfo.TopSellerCount > 5;
+            var hasMediumCompetition = competitionInfo.TotalCompetitors > 8 || competitionInfo.TopSellerCount > 2;
+
+            // Se o produto está acima do preço médio e tem muita competição = Alta
+            if (hasHighCompetition && product.SupplierPrice > competitionInfo.AveragePrice)
+                return "Alta";
+
+            // Se tem competição média = Media
+            if (hasMediumCompetition)
+                return "Media";
+
+            return "Baixa";
+        }
+
+        private static string DetermineSentiment(ScrapedProductDto product, EngagementInfoDto? engagementInfo)
+        {
+            // Se não tem dados de engajamento, usa apenas rating do produto
+            if (engagementInfo == null || engagementInfo.TrendScore == 0)
+            {
+                return product.Rating switch
+                {
+                    >= 4.5m => "Positivo",
+                    >= 3.5m => "Misto",
+                    _ => "Negativo"
+                };
+            }
+
+            // Com dados de engajamento: combina rating do produto + trend score geral
+            var productRatingScore = product.Rating >= 4.5m ? 2 : product.Rating >= 3.5m ? 1 : 0;
+            var trendScoreNormalized = engagementInfo.TrendScore >= 80 ? 2 : engagementInfo.TrendScore >= 60 ? 1 : 0;
+
+            var combinedScore = productRatingScore + trendScoreNormalized;
+
+            return combinedScore switch
+            {
+                >= 3 => "Positivo",
+                >= 2 => "Misto",
+                _ => "Negativo"
+            };
         }
     }
 }
