@@ -10,6 +10,7 @@ namespace RadarProdutos.Infrastructure.ExternalServices;
 public interface IAliExpressClient
 {
     Task<List<ScrapedProductDto>> SearchProductsAsync(string keyword);
+    Task<AliHotProductsResponse?> GetHotProductsAsync(string keyword, string? categoryIds = null, decimal? minSalePrice = null, decimal? maxSalePrice = null, int pageNo = 1, int pageSize = 20, string sort = "SALE_PRICE_ASC", string platformProductType = "ALL");
 }
 
 public class AliExpressClient : IAliExpressClient
@@ -241,6 +242,103 @@ public class AliExpressClient : IAliExpressClient
         return relevantProducts;
     }
 
+    public async Task<AliHotProductsResponse?> GetHotProductsAsync(
+        string keyword,
+        string? categoryIds = null,
+        decimal? minSalePrice = null,
+        decimal? maxSalePrice = null,
+        int pageNo = 1,
+        int pageSize = 20,
+        string sort = "SALE_PRICE_ASC",
+        string platformProductType = "ALL")
+    {
+        try
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+
+            // Parâmetros DEVEM estar em ordem alfabética para a assinatura
+            var parameters = new Dictionary<string, string>
+            {
+                { "app_key", _appKey },
+                { "format", "json" },
+                { "keywords", keyword },
+                { "method", "aliexpress.affiliate.hotproduct.query" },
+                { "page_no", pageNo.ToString() },
+                { "page_size", pageSize.ToString() },
+                { "platform_product_type", platformProductType },
+                { "sign_method", "md5" },
+                { "sort", sort },
+                { "target_currency", "USD" },
+                { "target_language", "EN" },
+                { "timestamp", timestamp },
+                { "v", "2.0" }
+            };
+
+            if (!string.IsNullOrEmpty(_trackingId))
+            {
+                parameters.Add("tracking_id", _trackingId);
+            }
+
+            if (!string.IsNullOrEmpty(categoryIds))
+            {
+                parameters.Add("category_ids", categoryIds);
+            }
+
+            if (minSalePrice.HasValue)
+            {
+                parameters.Add("min_sale_price", (minSalePrice.Value * 100).ToString("F0")); // Converte para centavos
+            }
+
+            if (maxSalePrice.HasValue)
+            {
+                parameters.Add("max_sale_price", (maxSalePrice.Value * 100).ToString("F0")); // Converte para centavos
+            }
+
+            // Ordena alfabeticamente e gera assinatura
+            var sortedParams = parameters.OrderBy(p => p.Key).ToList();
+            var sign = GenerateSignature(sortedParams);
+
+            // Constrói URL
+            var queryParams = new List<string>();
+            foreach (var param in sortedParams)
+            {
+                queryParams.Add($"{param.Key}={Uri.EscapeDataString(param.Value)}");
+            }
+            queryParams.Add($"sign={sign}");
+
+            var queryString = string.Join("&", queryParams);
+            var url = $"https://api-sg.aliexpress.com/sync?{queryString}";
+
+            Console.WriteLine($"🔥 Hot Products Request: {url.Substring(0, Math.Min(150, url.Length))}...");
+
+            var response = await _httpClient.GetAsync(url);
+            var json = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"❌ Hot Products API Error: {response.StatusCode}");
+                return null;
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<AliHotProductsResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            });
+
+            var productsCount = apiResponse?.RespResult?.Result?.Products?.Count ?? 0;
+            Console.WriteLine($"✅ Hot Products retornados: {productsCount}");
+            Console.WriteLine($"📊 Total records: {apiResponse?.RespResult?.Result?.TotalRecordCount}, Page {apiResponse?.RespResult?.Result?.CurrentPageNo}/{apiResponse?.RespResult?.Result?.TotalPageNo}");
+
+            return apiResponse;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Exception ao buscar Hot Products: {ex.Message}");
+            return null;
+        }
+    }
+
     private List<ScrapedProductDto> GetMockProducts(string keyword)
     {
         return new List<ScrapedProductDto>
@@ -338,3 +436,129 @@ public class Product
     [JsonPropertyName("original_price")]
     public string? OriginalPrice { get; set; }
 }
+
+// Classes para Hot Products API
+public class AliHotProductsResponse
+{
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("resp_result")]
+    public AliHotProductsRespResult? RespResult { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
+}
+
+public class AliHotProductsRespResult
+{
+    [JsonPropertyName("resp_code")]
+    public string? RespCode { get; set; }
+
+    [JsonPropertyName("resp_msg")]
+    public string? RespMsg { get; set; }
+
+    [JsonPropertyName("result")]
+    public AliHotProductsResult? Result { get; set; }
+}
+
+public class AliHotProductsResult
+{
+    [JsonPropertyName("current_page_no")]
+    public string? CurrentPageNo { get; set; }
+
+    [JsonPropertyName("current_record_count")]
+    public string? CurrentRecordCount { get; set; }
+
+    [JsonPropertyName("total_page_no")]
+    public string? TotalPageNo { get; set; }
+
+    [JsonPropertyName("total_record_count")]
+    public string? TotalRecordCount { get; set; }
+
+    [JsonPropertyName("products")]
+    public List<AliHotProduct>? Products { get; set; }
+}
+
+public class AliHotProduct
+{
+    [JsonPropertyName("product_id")]
+    public string? ProductId { get; set; }
+
+    [JsonPropertyName("product_title")]
+    public string? ProductTitle { get; set; }
+
+    [JsonPropertyName("product_detail_url")]
+    public string? ProductDetailUrl { get; set; }
+
+    [JsonPropertyName("product_small_image_urls")]
+    public List<string>? ProductSmallImageUrls { get; set; }
+
+    [JsonPropertyName("product_main_image_url")]
+    public string? ProductMainImageUrl { get; set; }
+
+    [JsonPropertyName("target_sale_price")]
+    public string? TargetSalePrice { get; set; }
+
+    [JsonPropertyName("target_original_price")]
+    public string? TargetOriginalPrice { get; set; }
+
+    [JsonPropertyName("target_sale_price_currency")]
+    public string? TargetSalePriceCurrency { get; set; }
+
+    [JsonPropertyName("target_original_price_currency")]
+    public string? TargetOriginalPriceCurrency { get; set; }
+
+    [JsonPropertyName("original_price")]
+    public string? OriginalPrice { get; set; }
+
+    [JsonPropertyName("original_price_currency")]
+    public string? OriginalPriceCurrency { get; set; }
+
+    [JsonPropertyName("sale_price")]
+    public string? SalePrice { get; set; }
+
+    [JsonPropertyName("sale_price_currency")]
+    public string? SalePriceCurrency { get; set; }
+
+    [JsonPropertyName("discount")]
+    public string? Discount { get; set; }
+
+    [JsonPropertyName("lastest_volume")]
+    public string? LastestVolume { get; set; }
+
+    [JsonPropertyName("commission_rate")]
+    public string? CommissionRate { get; set; }
+
+    [JsonPropertyName("hot_product_commission_rate")]
+    public string? HotProductCommissionRate { get; set; }
+
+    [JsonPropertyName("evaluate_rate")]
+    public string? EvaluateRate { get; set; }
+
+    [JsonPropertyName("shop_url")]
+    public string? ShopUrl { get; set; }
+
+    [JsonPropertyName("shop_id")]
+    public string? ShopId { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("first_level_category_id")]
+    public string? FirstLevelCategoryId { get; set; }
+
+    [JsonPropertyName("first_level_category_name")]
+    public string? FirstLevelCategoryName { get; set; }
+
+    [JsonPropertyName("second_level_category_id")]
+    public string? SecondLevelCategoryId { get; set; }
+
+    [JsonPropertyName("second_level_category_name")]
+    public string? SecondLevelCategoryName { get; set; }
+
+    [JsonPropertyName("platform_product_type")]
+    public string? PlatformProductType { get; set; }
+}
+
+

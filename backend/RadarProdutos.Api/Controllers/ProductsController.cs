@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using RadarProdutos.Application.DTOs;
+using RadarProdutos.Application.Requests;
+using RadarProdutos.Application.Services;
 using RadarProdutos.Domain.Interfaces;
 using System;
 using System.Linq;
@@ -12,10 +14,12 @@ namespace RadarProdutos.Api.Controllers
     public class ProductsController : ControllerBase
     {
         private readonly IProductRepository _productRepo;
+        private readonly IHotProductsService _hotProductsService;
 
-        public ProductsController(IProductRepository productRepo)
+        public ProductsController(IProductRepository productRepo, IHotProductsService hotProductsService)
         {
             _productRepo = productRepo;
+            _hotProductsService = hotProductsService;
         }
 
         // GET /api/products?page=1&pageSize=20&minMargin=15&competitionLevel=Baixa&sentiment=Positivo
@@ -70,6 +74,14 @@ namespace RadarProdutos.Api.Controllers
                 Sentiment = p.Sentiment,
                 Score = p.Score
             });
+        }
+
+        // GET /api/products/hot?keyword=phone&categoryIds=1,2&minSalePrice=10&maxSalePrice=100&pageNo=1&pageSize=20&sort=default&platformProductType=ALL
+        [HttpGet("hot")]
+        public async Task<IActionResult> GetHotProducts([FromQuery] HotProductsFilterDto filter)
+        {
+            var products = await _hotProductsService.GetHotProductsAsync(filter);
+            return Ok(products);
         }
     }
 }

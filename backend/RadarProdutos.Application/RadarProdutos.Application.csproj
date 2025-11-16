@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RadarProdutos.Domain\RadarProdutos.Domain.csproj" />
+    <ProjectReference Include="..\RadarProdutos.Infrastructure\RadarProdutos.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

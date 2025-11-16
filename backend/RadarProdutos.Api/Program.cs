@@ -34,6 +34,7 @@ builder.Services.AddScoped<IAnalysisConfigRepository, AnalysisConfigRepository>(
 
 // Application services
 builder.Services.AddScoped<IAnalysisService, AnalysisService>();
+builder.Services.AddScoped<IHotProductsService, HotProductsService>();
 
 // HttpClient typed client for scraper (reads base url from configuration)
 // AliExpress API Client
