@@ -11,6 +11,7 @@ public interface IAliExpressClient
 {
     Task<List<ScrapedProductDto>> SearchProductsAsync(string keyword);
     Task<AliHotProductsResponse?> GetHotProductsAsync(string keyword, string? categoryIds = null, decimal? minSalePrice = null, decimal? maxSalePrice = null, int pageNo = 1, int pageSize = 20, string sort = "SALE_PRICE_ASC", string platformProductType = "ALL");
+    Task<AliCategoryResponse?> GetCategoriesAsync();
 }
 
 public class AliExpressClient : IAliExpressClient
@@ -314,9 +315,18 @@ public class AliExpressClient : IAliExpressClient
             var response = await _httpClient.GetAsync(url);
             var json = await response.Content.ReadAsStringAsync();
 
+            Console.WriteLine($"🔥 Hot Products Response: {json.Substring(0, Math.Min(500, json.Length))}...");
+
             if (!response.IsSuccessStatusCode)
             {
                 Console.WriteLine($"❌ Hot Products API Error: {response.StatusCode}");
+                return null;
+            }
+
+            // Verifica se é uma resposta de erro
+            if (json.Contains("error_response"))
+            {
+                Console.WriteLine($"❌ Hot Products API retornou erro: {json}");
                 return null;
             }
 
@@ -335,6 +345,73 @@ public class AliExpressClient : IAliExpressClient
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Exception ao buscar Hot Products: {ex.Message}");
+            return null;
+        }
+    }
+
+    public async Task<AliCategoryResponse?> GetCategoriesAsync()
+    {
+        try
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+
+            // Parâmetros DEVEM estar em ordem alfabética para a assinatura
+            var parameters = new Dictionary<string, string>
+            {
+                { "app_key", _appKey },
+                { "format", "json" },
+                { "method", "aliexpress.affiliate.category.get" },
+                { "sign_method", "md5" },
+                { "timestamp", timestamp },
+                { "v", "2.0" }
+            };
+
+            if (!string.IsNullOrEmpty(_trackingId))
+            {
+                parameters.Add("tracking_id", _trackingId);
+            }
+
+            // Ordena alfabeticamente e gera assinatura
+            var sortedParams = parameters.OrderBy(p => p.Key).ToList();
+            var sign = GenerateSignature(sortedParams);
+
+            // Constrói URL
+            var queryParams = new List<string>();
+            foreach (var param in sortedParams)
+            {
+                queryParams.Add($"{param.Key}={Uri.EscapeDataString(param.Value)}");
+            }
+            queryParams.Add($"sign={sign}");
+
+            var queryString = string.Join("&", queryParams);
+            var url = $"https://api-sg.aliexpress.com/sync?{queryString}";
+
+            Console.WriteLine($"📂 Categories Request: {url.Substring(0, Math.Min(150, url.Length))}...");
+
+            var response = await _httpClient.GetAsync(url);
+            var json = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"❌ Categories API Error: {response.StatusCode}");
+                return null;
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<AliCategoryResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            });
+
+            var categoriesCount = apiResponse?.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.Categories?.Category?.Count ?? 0;
+            var totalCount = apiResponse?.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.TotalResultCount ?? 0;
+            Console.WriteLine($"✅ Categorias retornadas: {categoriesCount}/{totalCount}");
+
+            return apiResponse;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Exception ao buscar Categorias: {ex.Message}");
             return null;
         }
     }
@@ -561,4 +638,55 @@ public class AliHotProduct
     public string? PlatformProductType { get; set; }
 }
 
+// Classes para Category API
+public class AliCategoryResponse
+{
+    [JsonPropertyName("aliexpress_affiliate_category_get_response")]
+    public AliCategoryGetResponse? AliexpressAffiliateCategoryGetResponse { get; set; }
+}
+
+public class AliCategoryGetResponse
+{
+    [JsonPropertyName("resp_result")]
+    public AliCategoryRespResult? RespResult { get; set; }
+}
+
+public class AliCategoryRespResult
+{
+    [JsonPropertyName("resp_code")]
+    public int RespCode { get; set; }
+
+    [JsonPropertyName("resp_msg")]
+    public string? RespMsg { get; set; }
+
+    [JsonPropertyName("result")]
+    public AliCategoryResult? Result { get; set; }
+}
+
+public class AliCategoryResult
+{
+    [JsonPropertyName("total_result_count")]
+    public int TotalResultCount { get; set; }
+
+    [JsonPropertyName("categories")]
+    public AliCategoriesWrapper? Categories { get; set; }
+}
+
+public class AliCategoriesWrapper
+{
+    [JsonPropertyName("category")]
+    public List<AliCategory>? Category { get; set; }
+}
+
+public class AliCategory
+{
+    [JsonPropertyName("category_id")]
+    public long CategoryId { get; set; }
+
+    [JsonPropertyName("category_name")]
+    public string? CategoryName { get; set; }
+
+    [JsonPropertyName("parent_category_id")]
+    public long? ParentCategoryId { get; set; }
+}
 
