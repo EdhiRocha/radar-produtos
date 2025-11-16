@@ -1,0 +1,66 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+*.userprefs
+*.aps
+*.nupkg
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+**/Properties/launchSettings.json
+
+# EF Core
+**/Migrations/
+
+# Visual Studio
+.vs/
+.vscode/
+*.rsuser
+*.userosscache
+*.sln.docstates
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+.pnpm-store/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.env*.local
+
+# Docker
+docker-compose.override.yml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Sensitive files
+appsettings.Development.json
+appsettings.Production.json
+*.pfx
+*.p12
+
+# IDE
+.idea/
+*.iml
+*.code-workspace
