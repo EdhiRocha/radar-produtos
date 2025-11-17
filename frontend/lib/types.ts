@@ -16,6 +16,22 @@ export interface Product {
   sentiment: string;
   score: number;
   productAnalysisId: number;
+
+  // Métricas adicionais
+  shopName?: string;
+  shopUrl?: string;
+  shippingDays?: number;
+  commissionRate?: number;
+  hasVideo?: boolean;
+  hasPromotion?: boolean;
+
+  // Campos importantes adicionados
+  originalPrice?: number;
+  discount?: string; // Ex: "50%"
+  promotionLink?: string;
+  productDetailUrl?: string;
+  firstLevelCategoryId?: string;
+  firstLevelCategoryName?: string;
 }
 
 export interface ProductAnalysis {
@@ -38,7 +54,17 @@ export interface AnalysisConfig {
 }
 
 export interface RunAnalysisRequest {
-  keyword: string;
+  keyword?: string;
+  categoryIds?: string; // Ex: "111,222,333"
+  sort?:
+    | "SALE_PRICE_ASC"
+    | "SALE_PRICE_DESC"
+    | "LAST_VOLUME_ASC"
+    | "LAST_VOLUME_DESC";
+  maxSalePrice?: number; // em centavos
+  minSalePrice?: number; // em centavos
+  pageNo?: number;
+  pageSize?: number;
 }
 
 export interface PaginatedProducts {
@@ -47,4 +73,10 @@ export interface PaginatedProducts {
   pageNumber: number;
   pageSize: number;
   totalPages: number;
+}
+
+export interface Category {
+  categoryId: string;
+  categoryName: string;
+  parentCategoryId?: string;
 }

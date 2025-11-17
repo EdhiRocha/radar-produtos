@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RadarProdutos.Api.Middleware;
 using RadarProdutos.Application.Services;
 using RadarProdutos.Domain.Interfaces;
 using RadarProdutos.Infrastructure.Data;
@@ -11,18 +12,25 @@ var builder = WebApplication.CreateBuilder(args);
 // Configuration
 builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
 
+// Logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 // DbContext - PostgreSQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var logger = builder.Logging.Services.BuildServiceProvider().GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+
 if (string.IsNullOrEmpty(connectionString))
 {
     // Fallback para InMemory se não tiver connection string configurada
-    Console.WriteLine("⚠️  Connection string não encontrada. Usando InMemory Database.");
+    logger.LogWarning("Connection string não encontrada. Usando InMemory Database");
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseInMemoryDatabase("RadarDb"));
 }
 else
 {
-    Console.WriteLine($"✅ Conectando ao PostgreSQL: {connectionString.Split(';')[0]}");
+    logger.LogInformation("Conectando ao PostgreSQL: {ConnectionInfo}", connectionString.Split(';')[0]);
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseNpgsql(connectionString));
 }
@@ -31,6 +39,8 @@ else
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<IProductAnalysisRepository, ProductAnalysisRepository>();
 builder.Services.AddScoped<IAnalysisConfigRepository, AnalysisConfigRepository>();
+builder.Services.AddScoped<IMarketplaceConfigRepository, MarketplaceConfigRepository>();
+builder.Services.AddScoped<IShippingEstimateRepository, ShippingEstimateRepository>();
 
 // Application services
 builder.Services.AddScoped<IAnalysisService, AnalysisService>();
@@ -52,36 +62,25 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     // Aplicar migrations automaticamente
     try
     {
         db.Database.Migrate();
-        Console.WriteLine("✅ Migrations aplicadas com sucesso");
+        seedLogger.LogInformation("Migrations aplicadas com sucesso");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"⚠️  Erro ao aplicar migrations: {ex.Message}");
+        seedLogger.LogWarning(ex, "Erro ao aplicar migrations");
         // Se for InMemory, migrations não funcionam, apenas seguir em frente
     }
 
-    // Seed config
-    if (!db.AnalysisConfigs.Any())
-    {
-        db.AnalysisConfigs.Add(new RadarProdutos.Domain.Entities.AnalysisConfig
-        {
-            Id = 1,
-            MinMarginPercent = 10,
-            MaxMarginPercent = 60,
-            WeightSales = 1,
-            WeightCompetition = 1,
-            WeightSentiment = 1,
-            WeightMargin = 1
-        });
-        db.SaveChanges();
-        Console.WriteLine("✅ AnalysisConfig seed criado");
-    }
+    // Seed config removido - agora vem das migrations
 }
+
+// Exception Handling Middleware (DEVE vir antes de qualquer outro middleware)
+app.UseExceptionHandling();
 
 // Swagger habilitado em todos os ambientes
 app.UseSwagger();

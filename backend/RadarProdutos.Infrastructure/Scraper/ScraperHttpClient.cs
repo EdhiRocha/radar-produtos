@@ -23,6 +23,25 @@ namespace RadarProdutos.Infrastructure.Scraper
             return await _aliExpressClient.SearchProductsAsync(keyword);
         }
 
+        public async Task<List<ScrapedProductDto>> GetProductsWithFiltersAsync(
+            string? keyword,
+            string? categoryIds,
+            string? sort,
+            decimal? maxSalePrice,
+            decimal? minSalePrice,
+            int pageNo,
+            int pageSize)
+        {
+            return await _aliExpressClient.SearchProductsWithFiltersAsync(
+                keyword,
+                categoryIds,
+                sort,
+                maxSalePrice,
+                minSalePrice,
+                pageNo,
+                pageSize);
+        }
+
         public async Task<CompetitionInfoDto?> GetCompetitionInfoAsync(string productName)
         {
             var products = await _aliExpressClient.SearchProductsAsync(productName);

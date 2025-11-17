@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using RadarProdutos.Application.DTOs;
+using RadarProdutos.Application.Exceptions;
 using RadarProdutos.Application.Requests;
 using RadarProdutos.Domain.DTOs;
 using RadarProdutos.Domain.Entities;
@@ -22,35 +24,42 @@ namespace RadarProdutos.Application.Services
         private readonly IProductRepository _productRepository;
         private readonly IProductAnalysisRepository _analysisRepository;
         private readonly IAnalysisConfigRepository _configRepository;
+        private readonly ILogger<AnalysisService> _logger;
 
         public AnalysisService(
             IScraperClient scraper,
             IProductRepository productRepository,
             IProductAnalysisRepository analysisRepository,
-            IAnalysisConfigRepository configRepository)
+            IAnalysisConfigRepository configRepository,
+            ILogger<AnalysisService> logger)
         {
             _scraper = scraper;
             _productRepository = productRepository;
             _analysisRepository = analysisRepository;
             _configRepository = configRepository;
+            _logger = logger;
         }
 
         public async Task<List<ProductDto>> RunAnalysisAsync(RunAnalysisRequest request)
         {
-            var scraped = await _scraper.GetProductsFromSupplierAsync(request.Keyword);
+            // Chama AliExpress com todos os filtros
+            var scraped = await _scraper.GetProductsWithFiltersAsync(
+                request.Keyword,
+                request.CategoryIds,
+                request.Sort,
+                request.MaxSalePrice,
+                request.MinSalePrice,
+                request.PageNo,
+                request.PageSize);
 
-            var config = await _configRepository.GetAsync() ?? new AnalysisConfig
+            var config = await _configRepository.GetAsync();
+            if (config == null)
             {
-                Id = 1,
-                MinMarginPercent = 10,
-                MaxMarginPercent = 60,
-                WeightSales = 1,
-                WeightCompetition = 1,
-                WeightSentiment = 1,
-                WeightMargin = 1
-            };
+                _logger.LogError("AnalysisConfig não encontrado no banco de dados");
+                throw new ConfigurationNotFoundException("AnalysisConfig");
+            }
 
-            var analysis = new ProductAnalysis { Id = Guid.NewGuid(), Keyword = request.Keyword, CreatedAt = DateTime.UtcNow };
+            var analysis = new ProductAnalysis { Id = Guid.NewGuid(), Keyword = request.Keyword ?? "Radar", CreatedAt = DateTime.UtcNow };
 
             // Busca agregada de competição/engajamento usando a keyword original
             // Isso faz apenas 2 chamadas extras em vez de 40+
@@ -68,12 +77,16 @@ namespace RadarProdutos.Application.Services
                 competitionInfo = await competitionTask;
                 engagementInfo = await engagementTask;
 
-                Console.WriteLine($"📊 Competição: {competitionInfo?.TotalCompetitors} competidores, preço médio: {competitionInfo?.AveragePrice:C2}");
-                Console.WriteLine($"📈 Engajamento: Volume {engagementInfo?.SearchVolume}, TrendScore: {engagementInfo?.TrendScore}");
+                _logger.LogInformation(
+                    "Métricas agregadas - Competição: {TotalCompetitors} competidores, Preço médio: {AveragePrice:C2}, Engajamento Volume: {SearchVolume}, TrendScore: {TrendScore}",
+                    competitionInfo?.TotalCompetitors,
+                    competitionInfo?.AveragePrice,
+                    engagementInfo?.SearchVolume,
+                    engagementInfo?.TrendScore);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️  Erro ao buscar métricas agregadas: {ex.Message}. Usando valores padrão.");
+                _logger.LogWarning(ex, "Erro ao buscar métricas agregadas. Usando valores padrão");
             }
 
             var products = new List<Product>();
@@ -120,22 +133,7 @@ namespace RadarProdutos.Application.Services
             await _productRepository.AddRangeAsync(products);
 
             // return DTOs
-            return products.Select(p => new ProductDto
-            {
-                Id = p.Id,
-                ExternalId = p.ExternalId,
-                Name = p.Name,
-                Supplier = p.Supplier,
-                ImageUrl = p.ImageUrl,
-                SupplierPrice = p.SupplierPrice,
-                EstimatedSalePrice = p.EstimatedSalePrice,
-                MarginPercent = p.MarginPercent,
-                Rating = p.Rating,
-                Orders = p.Orders,
-                CompetitionLevel = p.CompetitionLevel,
-                Sentiment = p.Sentiment,
-                Score = p.Score
-            }).ToList();
+            return products.Select(p => MapToProductDto(p, scraped.FirstOrDefault(s => s.ExternalId == p.ExternalId))).ToList();
         }
 
         public async Task<ProductAnalysisDto?> GetLatestAnalysisAsync()
@@ -221,6 +219,41 @@ namespace RadarProdutos.Application.Services
                 >= 3 => "Positivo",
                 >= 2 => "Misto",
                 _ => "Negativo"
+            };
+        }
+
+        private static ProductDto MapToProductDto(Product product, ScrapedProductDto? scrapedData)
+        {
+            return new ProductDto
+            {
+                Id = product.Id,
+                ExternalId = product.ExternalId,
+                Name = product.Name,
+                Supplier = product.Supplier,
+                ImageUrl = product.ImageUrl,
+                SupplierUrl = scrapedData?.SupplierUrl,
+                SupplierPrice = product.SupplierPrice,
+                EstimatedSalePrice = product.EstimatedSalePrice,
+                MarginPercent = product.MarginPercent,
+                Rating = product.Rating,
+                Orders = product.Orders,
+                CompetitionLevel = product.CompetitionLevel,
+                Sentiment = product.Sentiment,
+                Score = product.Score,
+
+                // Campos extras do ScrapedProductDto
+                OriginalPrice = scrapedData?.OriginalPrice,
+                Discount = scrapedData?.Discount,
+                ShopUrl = scrapedData?.ShopUrl,
+                ShopName = scrapedData?.ShopName,
+                PromotionLink = scrapedData?.PromotionLink,
+                ProductDetailUrl = scrapedData?.ProductDetailUrl,
+                FirstLevelCategoryId = scrapedData?.FirstLevelCategoryId,
+                FirstLevelCategoryName = scrapedData?.FirstLevelCategoryName,
+                ShippingDays = scrapedData?.ShippingDays,
+                CommissionRate = scrapedData?.CommissionRate,
+                HasVideo = scrapedData?.HasVideo ?? false,
+                HasPromotion = !string.IsNullOrEmpty(scrapedData?.PromotionLink)
             };
         }
     }

@@ -13,6 +13,19 @@ namespace RadarProdutos.Domain.DTOs
         public decimal AverageRating { get; set; }
         public int Orders { get; set; }
         public int TotalSales { get; set; }
+
+        // Campos adicionais da API AliExpress
+        public decimal? OriginalPrice { get; set; }
+        public string? Discount { get; set; } // Ex: "50%"
+        public string? ShopUrl { get; set; }
+        public string? ShopName { get; set; }
+        public string? PromotionLink { get; set; }
+        public string? FirstLevelCategoryId { get; set; }
+        public string? FirstLevelCategoryName { get; set; }
+        public string? ProductDetailUrl { get; set; }
+        public int? ShippingDays { get; set; }
+        public decimal? CommissionRate { get; set; }
+        public bool HasVideo { get; set; }
     }
 
     public class CompetitionInfoDto

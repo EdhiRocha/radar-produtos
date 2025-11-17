@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, List, Settings, BarChart3 } from "lucide-react";
+import { Home, List, Settings, BarChart3, Flame, Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const menuItems = [
   { icon: Home, label: "Dashboard", href: "/" },
+  { icon: Radar, label: "Radar de Produtos", href: "/radar" },
   { icon: List, label: "Produtos", href: "/produtos" },
+  { icon: Flame, label: "Hot Products", href: "/hot-products" },
   { icon: BarChart3, label: "Análises", href: "/analises" },
   { icon: Settings, label: "Configurações", href: "/configuracoes" },
 ];

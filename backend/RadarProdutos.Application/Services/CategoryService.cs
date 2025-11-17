@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using RadarProdutos.Application.DTOs;
 using RadarProdutos.Infrastructure.ExternalServices;
 
@@ -5,27 +6,30 @@ namespace RadarProdutos.Application.Services;
 
 public interface ICategoryService
 {
-    Task<IReadOnlyList<CategoryDto>> GetCategoriesAsync(CancellationToken cancellationToken = default);
+    Task<List<CategoryDto>> GetCategoriesAsync();
 }
 
 public class CategoryService : ICategoryService
 {
     private readonly IAliExpressClient _aliClient;
+    private readonly ILogger<CategoryService> _logger;
 
-    public CategoryService(IAliExpressClient aliClient)
+    public CategoryService(IAliExpressClient aliClient, ILogger<CategoryService> logger)
     {
         _aliClient = aliClient;
+        _logger = logger;
     }
 
-    public async Task<IReadOnlyList<CategoryDto>> GetCategoriesAsync(CancellationToken cancellationToken = default)
+    public async Task<List<CategoryDto>> GetCategoriesAsync()
     {
         var response = await _aliClient.GetCategoriesAsync();
 
-        if (response?.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.Categories?.Category == null ||
+        if (response == null ||
+            response.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.Categories?.Category == null ||
             !response.AliexpressAffiliateCategoryGetResponse.RespResult.Result.Categories.Category.Any())
         {
-            Console.WriteLine("⚠️ Nenhuma categoria retornada pela API");
-            return Array.Empty<CategoryDto>();
+            _logger.LogWarning("Nenhuma categoria retornada pela API AliExpress");
+            return new List<CategoryDto>();
         }
 
         var categories = response.AliexpressAffiliateCategoryGetResponse.RespResult.Result.Categories.Category

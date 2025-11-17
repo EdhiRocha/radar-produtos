@@ -163,20 +163,108 @@ export function ProductModal({ product, open, onClose }: ProductModalProps) {
                     {product.orders.toLocaleString()}
                   </span>
                 </div>
+
+                {/* Novas métricas */}
+                {product.shippingDays && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Prazo de Entrega:</span>
+                    <Badge
+                      variant={
+                        product.shippingDays <= 15
+                          ? "default"
+                          : product.shippingDays <= 30
+                          ? "secondary"
+                          : "destructive"
+                      }
+                    >
+                      {product.shippingDays} dias
+                    </Badge>
+                  </div>
+                )}
+
+                {product.commissionRate && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Comissão:</span>
+                    <span className="font-bold text-purple-600">
+                      {product.commissionRate.toFixed(1)}%
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Recursos:</span>
+                  <div className="flex gap-2">
+                    {product.hasVideo && (
+                      <Badge variant="outline" className="bg-blue-50">
+                        📹 Vídeo
+                      </Badge>
+                    )}
+                    {product.hasPromotion && (
+                      <Badge variant="outline" className="bg-orange-50">
+                        🎁 Promoção
+                      </Badge>
+                    )}
+                    {!product.hasVideo && !product.hasPromotion && (
+                      <span className="text-sm text-muted-foreground">
+                        Nenhum recurso extra
+                      </span>
+                    )}
+                  </div>
+                </div>
               </CardContent>
             </Card>
+
+            {/* Loja do Fornecedor */}
+            {product.shopName && product.shopUrl && (
+              <Card className="shadow-lg border-blue-200 bg-blue-50/50">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2 text-blue-700">
+                    <Award className="h-5 w-5" />
+                    Loja Oficial
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="bg-white rounded-lg p-3 border border-blue-200">
+                    <div className="text-xs text-gray-500 mb-1">
+                      Nome da Loja
+                    </div>
+                    <div className="font-bold text-blue-900">
+                      {product.shopName}
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
+                    onClick={() => window.open(product.shopUrl, "_blank")}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Visitar Loja do Fornecedor
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             <Button
               className="w-full gap-2"
               size="lg"
-              onClick={() =>
-                product.supplierUrl &&
-                window.open(product.supplierUrl, "_blank")
-              }
-              disabled={!product.supplierUrl}
+              onClick={() => {
+                if (product.supplierUrl) {
+                  window.open(product.supplierUrl, "_blank");
+                } else {
+                  // Busca genérica no AliExpress com o nome do produto
+                  const searchQuery = encodeURIComponent(
+                    product.name.substring(0, 100)
+                  );
+                  window.open(
+                    `https://www.aliexpress.com/wholesale?SearchText=${searchQuery}`,
+                    "_blank"
+                  );
+                }
+              }}
             >
               <ExternalLink className="h-4 w-4" />
-              Ver no AliExpress
+              {product.supplierUrl
+                ? "Ver Produto no AliExpress"
+                : "Buscar no AliExpress"}
             </Button>
           </div>
 

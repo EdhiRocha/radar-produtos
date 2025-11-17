@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using RadarProdutos.Domain.Entities;
 using RadarProdutos.Domain.Interfaces;
 using RadarProdutos.Infrastructure.Data;
@@ -12,10 +13,12 @@ namespace RadarProdutos.Infrastructure.Repositories
     public class ProductRepository : IProductRepository
     {
         private readonly AppDbContext _db;
+        private readonly ILogger<ProductRepository> _logger;
 
-        public ProductRepository(AppDbContext db)
+        public ProductRepository(AppDbContext db, ILogger<ProductRepository> logger)
         {
             _db = db;
+            _logger = logger;
         }
 
         public async Task AddRangeAsync(IEnumerable<Product> products)
@@ -54,6 +57,18 @@ namespace RadarProdutos.Infrastructure.Repositories
 
         public async Task<List<Product>> GetPagedAsync(int page, int pageSize, decimal? minMargin, string? competitionLevel, string? sentiment)
         {
+            var q = BuildQuery(minMargin, competitionLevel, sentiment);
+            return await q.OrderByDescending(p => p.Score).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        }
+
+        public async Task<int> GetTotalCountAsync(decimal? minMargin, string? competitionLevel, string? sentiment)
+        {
+            var q = BuildQuery(minMargin, competitionLevel, sentiment);
+            return await q.CountAsync();
+        }
+
+        private IQueryable<Product> BuildQuery(decimal? minMargin, string? competitionLevel, string? sentiment)
+        {
             var q = _db.Products.AsQueryable();
 
             if (minMargin.HasValue)
@@ -65,7 +80,7 @@ namespace RadarProdutos.Infrastructure.Repositories
             if (!string.IsNullOrEmpty(sentiment))
                 q = q.Where(p => p.Sentiment == sentiment);
 
-            return await q.OrderByDescending(p => p.Score).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+            return q;
         }
 
         public async Task<List<Product>> GetAllByAnalysisIdAsync(Guid analysisId)

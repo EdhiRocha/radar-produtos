@@ -32,23 +32,32 @@ namespace RadarProdutos.Api.Controllers
             [FromQuery] string? sentiment = null)
         {
             var products = await _productRepo.GetPagedAsync(page, pageSize, minMargin, competitionLevel, sentiment);
+            var totalCount = await _productRepo.GetTotalCountAsync(minMargin, competitionLevel, sentiment);
 
-            return Ok(products.Select(p => new ProductDto
+            var response = new PaginatedResponse<ProductDto>
             {
-                Id = p.Id,
-                ExternalId = p.ExternalId,
-                Name = p.Name,
-                Supplier = p.Supplier,
-                ImageUrl = p.ImageUrl,
-                SupplierPrice = p.SupplierPrice,
-                EstimatedSalePrice = p.EstimatedSalePrice,
-                MarginPercent = p.MarginPercent,
-                Rating = p.Rating,
-                Orders = p.Orders,
-                CompetitionLevel = p.CompetitionLevel,
-                Sentiment = p.Sentiment,
-                Score = p.Score
-            }).ToList());
+                Items = products.Select(p => new ProductDto
+                {
+                    Id = p.Id,
+                    ExternalId = p.ExternalId,
+                    Name = p.Name,
+                    Supplier = p.Supplier,
+                    ImageUrl = p.ImageUrl,
+                    SupplierPrice = p.SupplierPrice,
+                    EstimatedSalePrice = p.EstimatedSalePrice,
+                    MarginPercent = p.MarginPercent,
+                    Rating = p.Rating,
+                    Orders = p.Orders,
+                    CompetitionLevel = p.CompetitionLevel,
+                    Sentiment = p.Sentiment,
+                    Score = p.Score
+                }).ToList(),
+                TotalCount = totalCount,
+                PageNumber = page,
+                PageSize = pageSize
+            };
+
+            return Ok(response);
         }
 
         // GET /api/products/{id}

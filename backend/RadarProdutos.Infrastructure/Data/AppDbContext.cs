@@ -15,6 +15,8 @@ namespace RadarProdutos.Infrastructure.Data
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<Plan> Plans { get; set; } = null!;
         public DbSet<Subscription> Subscriptions { get; set; } = null!;
+        public DbSet<MarketplaceConfig> MarketplaceConfigs { get; set; } = null!;
+        public DbSet<ShippingEstimate> ShippingEstimates { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -50,6 +52,19 @@ namespace RadarProdutos.Infrastructure.Data
             modelBuilder.Entity<AnalysisConfig>(b =>
             {
                 b.HasKey(c => c.Id);
+
+                // Seed data - configuração padrão de análise
+                // Pesos ajustados para criar maior diferenciação entre produtos
+                b.HasData(new AnalysisConfig
+                {
+                    Id = 1,
+                    MinMarginPercent = 20m,
+                    MaxMarginPercent = 80m,
+                    WeightSales = 2.5m,         // Vendas têm maior peso (indicador de demanda)
+                    WeightCompetition = 2.0m,   // Competição é muito importante
+                    WeightSentiment = 1.5m,     // Sentimento impacta conversão
+                    WeightMargin = 3.0m         // Margem é crítica para lucratividade
+                });
             });
 
             // User
@@ -129,6 +144,45 @@ namespace RadarProdutos.Infrastructure.Data
 
                 b.HasIndex(s => s.UserId).IsUnique();
                 b.HasIndex(s => new { s.UserId, s.IsActive });
+            });
+
+            // MarketplaceConfig
+            modelBuilder.Entity<MarketplaceConfig>(b =>
+            {
+                b.HasKey(c => c.Id);
+
+                // Seed data - configuração padrão
+                b.HasData(new MarketplaceConfig
+                {
+                    Id = 1,
+                    MinMarginPercent = 30m,
+                    TargetMarginPercent = 50m,
+                    MercadoLivreFixedFee = 20m,
+                    MercadoLivrePercentFee = 15m,
+                    MercadoLivreBoostFee = 5m,
+                    ImportTaxPercent = 60m,
+                    CompanyTaxPercent = 8.93m,
+                    UsdToBrlRate = 5.70m,
+                    AutoUpdateExchangeRate = false,
+                    DefaultShippingCostUsd = 15m,
+                    UseEstimatedShipping = true,
+                    MinSalesVolume = 100,
+                    MinSupplierRating = 4.0m,
+                    MaxDeliveryDays = 45,
+                    WeightMargin = 1.5m,
+                    WeightSales = 1.0m,
+                    WeightRating = 1.0m,
+                    WeightDelivery = 0.5m,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            });
+
+            // ShippingEstimate
+            modelBuilder.Entity<ShippingEstimate>(b =>
+            {
+                b.HasKey(s => s.Id);
+                b.HasIndex(s => s.CategoryId);
             });
         }
     }

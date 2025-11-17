@@ -10,6 +10,7 @@ namespace RadarProdutos.Domain.Interfaces
         Task AddRangeAsync(IEnumerable<Product> products);
         Task<Product?> GetByIdAsync(Guid id);
         Task<List<Product>> GetPagedAsync(int page, int pageSize, decimal? minMargin, string? competitionLevel, string? sentiment);
+        Task<int> GetTotalCountAsync(decimal? minMargin, string? competitionLevel, string? sentiment);
         Task<List<Product>> GetAllByAnalysisIdAsync(Guid analysisId);
     }
 }

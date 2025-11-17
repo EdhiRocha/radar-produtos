@@ -49,37 +49,23 @@ export default function ProductsPage() {
     try {
       setIsLoading(true);
 
-      console.log("=== Iniciando carregamento de produtos ===");
+      // Buscar produtos direto da API (banco de dados)
+      const response = await productsApi.getAll();
+      const items = response.items || response || [];
 
-      // Tentar carregar do localStorage primeiro
-      const localProducts = localStorage.getItem("products");
-      console.log("localStorage raw:", localProducts);
+      setProducts(items);
 
-      if (localProducts) {
-        const parsedProducts = JSON.parse(localProducts);
-        console.log("Produtos parseados do localStorage:", parsedProducts);
-        console.log("Quantidade de produtos:", parsedProducts.length);
-        setProducts(parsedProducts);
-        console.log(
-          "Produtos carregados do localStorage:",
-          parsedProducts.length
-        );
+      if (items.length > 0) {
+        toast.success(`${items.length} produtos carregados`);
       } else {
-        console.log("localStorage vazio, tentando API...");
-        // Se não tiver no localStorage, tentar da API
-        const response = await productsApi.getAll();
-        console.log("Resposta da API getAll:", response);
-        setProducts(response.items || []);
+        toast.info("Nenhum produto encontrado. Execute uma análise primeiro.");
       }
     } catch (error) {
       console.error("Erro ao carregar produtos:", error);
-      // Se der erro na API, tentar localStorage como fallback
-      const localProducts = localStorage.getItem("products");
-      if (localProducts) {
-        setProducts(JSON.parse(localProducts));
-      } else {
-        toast.error("Erro ao carregar produtos");
-      }
+      toast.error(
+        "Erro ao carregar produtos. Verifique se o backend está rodando."
+      );
+      setProducts([]);
     } finally {
       setIsLoading(false);
     }

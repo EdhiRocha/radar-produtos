@@ -17,8 +17,30 @@ public static class HotProductMapper
         var rating = ParseDecimal(src.EvaluateRate ?? "0") / 20m; // Converte de 0-100 para 0-5
         var sales = ParseInt(src.LastestVolume ?? "0");
 
+        // Se a API não retorna vendas (0), estimamos baseado em rating e desconto
+        // Produtos "Hot" com bom rating provavelmente têm vendas razoáveis
+        if (sales == 0 && rating >= 4.0m)
+        {
+            var discount = ParseDecimal(src.Discount ?? "0");
+            // Estimativa conservadora: rating alto + desconto = produto popular
+            sales = rating switch
+            {
+                >= 4.8m => discount > 30 ? 2000 : 1200,  // Excelente
+                >= 4.5m => discount > 30 ? 1500 : 800,   // Muito bom
+                >= 4.2m => discount > 30 ? 1000 : 500,   // Bom
+                >= 4.0m => discount > 30 ? 600 : 300,    // Razoável
+                _ => 0
+            };
+        }
+
         // Pega a primeira imagem disponível (prioriza main, depois small)
         var imageUrl = src.ProductMainImageUrl ?? src.ProductSmallImageUrls?.FirstOrDefault() ?? "";
+
+        // Extrai prazo de entrega do campo ship_to_days (ex: "ship to RU in 7 days")
+        var shippingDays = ExtractShippingDays(src.ShipToDays);
+
+        // Extrai taxa de comissão
+        var commissionRate = ParseDecimal(src.CommissionRate ?? "0");
 
         return new ProductDto
         {
@@ -27,6 +49,7 @@ public static class HotProductMapper
             Name = src.ProductTitle ?? "Produto sem nome",
             Supplier = "AliExpress",
             ImageUrl = imageUrl,
+            SupplierUrl = src.ProductDetailUrl,
             SupplierPrice = supplierPrice,
             EstimatedSalePrice = estimatedSalePrice,
             MarginPercent = decimal.Round(marginPercent, 2),
@@ -34,8 +57,27 @@ public static class HotProductMapper
             Orders = sales,
             CompetitionLevel = DetermineCompetitionLevel(sales),
             Sentiment = DetermineSentiment(rating),
-            Score = 0 // Será calculado pelo ProductScoreCalculator
+            Score = 0, // Será calculado pelo ProductScoreCalculator
+
+            // Métricas adicionais
+            ShopName = src.ShopName,
+            ShopUrl = src.ShopUrl,
+            ShippingDays = shippingDays,
+            CommissionRate = commissionRate > 0 ? commissionRate : null,
+            HasVideo = !string.IsNullOrEmpty(src.ProductVideoUrl),
+            HasPromotion = !string.IsNullOrEmpty(src.PromotionLink)
         };
+    }
+
+    private static int? ExtractShippingDays(string? shipToDays)
+    {
+        if (string.IsNullOrWhiteSpace(shipToDays)) return null;
+
+        // Extrai números do texto "ship to RU in 7 days"
+        var numbers = new string(shipToDays.Where(char.IsDigit).ToArray());
+        if (string.IsNullOrEmpty(numbers)) return null;
+
+        return int.TryParse(numbers, out var days) ? days : null;
     }
 
     private static int ParseInt(string value)

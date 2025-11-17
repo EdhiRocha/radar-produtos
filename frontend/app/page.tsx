@@ -1,69 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Search,
-  Package,
-  TrendingUp,
-  Users,
-  Youtube,
-  Loader2,
-} from "lucide-react";
-import { analysisApi } from "@/lib/api";
-import { toast } from "sonner";
+import { Package, TrendingUp, Users, Youtube } from "lucide-react";
 
 export default function DashboardPage() {
-  const [keyword, setKeyword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
-
-  const handleSearch = async () => {
-    setIsLoading(true);
-    try {
-      const result = await analysisApi.run({ keyword: keyword.trim() });
-
-      console.log("Resposta da API:", result);
-
-      // A API retorna um array diretamente, não um objeto com propriedade products
-      const products = Array.isArray(result) ? result : result.products || [];
-
-      console.log("Produtos recebidos:", products);
-      console.log("Quantidade de produtos:", products.length);
-
-      // Salvar produtos no localStorage
-      if (products && products.length > 0) {
-        localStorage.setItem("products", JSON.stringify(products));
-        console.log("Produtos salvos no localStorage");
-        toast.success(
-          `Análise concluída! ${products.length} produtos encontrados`
-        );
-      } else {
-        console.log("Nenhum produto para salvar");
-        toast.warning("Nenhum produto encontrado para esta busca");
-      }
-
-      router.push(`/produtos`);
-    } catch (error) {
-      console.error("Erro ao analisar produtos:", error);
-      toast.error("Erro ao analisar produtos. Tente novamente.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !isLoading) {
-      handleSearch();
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
@@ -77,48 +20,6 @@ export default function DashboardPage() {
               Livre
             </p>
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Pesquisar Produtos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-4">
-                <Input
-                  placeholder="Digite uma palavra-chave (opcional - deixe vazio para produtos em alta)..."
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  disabled={isLoading}
-                  className="flex-1"
-                />
-                <Button
-                  onClick={handleSearch}
-                  disabled={isLoading}
-                  className="gap-2"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Analisando...
-                    </>
-                  ) : (
-                    <>
-                      <Search className="h-4 w-4" />
-                      {keyword.trim()
-                        ? "Pesquisar produtos"
-                        : "Ver produtos em alta"}
-                    </>
-                  )}
-                </Button>
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                {keyword.trim()
-                  ? "Busca produtos no AliExpress e calcula score, margem e competição"
-                  : "Deixe vazio para descobrir os produtos mais quentes do momento"}
-              </p>
-            </CardContent>
-          </Card>
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             <StatCard

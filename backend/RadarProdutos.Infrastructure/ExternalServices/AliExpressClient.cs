@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using RadarProdutos.Domain.DTOs;
 
 namespace RadarProdutos.Infrastructure.ExternalServices;
@@ -10,6 +11,7 @@ namespace RadarProdutos.Infrastructure.ExternalServices;
 public interface IAliExpressClient
 {
     Task<List<ScrapedProductDto>> SearchProductsAsync(string keyword);
+    Task<List<ScrapedProductDto>> SearchProductsWithFiltersAsync(string? keyword, string? categoryIds, string? sort, decimal? maxSalePrice, decimal? minSalePrice, int pageNo, int pageSize);
     Task<AliHotProductsResponse?> GetHotProductsAsync(string keyword, string? categoryIds = null, decimal? minSalePrice = null, decimal? maxSalePrice = null, int pageNo = 1, int pageSize = 20, string sort = "SALE_PRICE_ASC", string platformProductType = "ALL");
     Task<AliCategoryResponse?> GetCategoriesAsync();
 }
@@ -20,17 +22,31 @@ public class AliExpressClient : IAliExpressClient
     private readonly string _appKey;
     private readonly string _appSecret;
     private readonly string? _trackingId;
+    private readonly ILogger<AliExpressClient> _logger;
 
-    public AliExpressClient(HttpClient httpClient, IConfiguration configuration)
+    public AliExpressClient(HttpClient httpClient, IConfiguration configuration, ILogger<AliExpressClient> logger)
     {
         _httpClient = httpClient;
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
         _appKey = configuration["AliExpress:AppKey"] ?? throw new InvalidOperationException("AliExpress:AppKey não configurado");
         _appSecret = configuration["AliExpress:AppSecret"] ?? throw new InvalidOperationException("AliExpress:AppSecret não configurado");
         _trackingId = configuration["AliExpress:TrackingId"];
+        _logger = logger;
     }
 
     public async Task<List<ScrapedProductDto>> SearchProductsAsync(string keyword)
+    {
+        return await SearchProductsWithFiltersAsync(keyword, null, null, null, null, 1, 20);
+    }
+
+    public async Task<List<ScrapedProductDto>> SearchProductsWithFiltersAsync(
+        string? keyword,
+        string? categoryIds,
+        string? sort,
+        decimal? maxSalePrice,
+        decimal? minSalePrice,
+        int pageNo,
+        int pageSize)
     {
         try
         {
@@ -41,18 +57,32 @@ public class AliExpressClient : IAliExpressClient
             {
                 { "app_key", _appKey },
                 { "format", "json" },
-                { "keywords", keyword },
                 { "method", "aliexpress.affiliate.product.query" },
-                { "page_size", "20" },
+                { "page_no", pageNo.ToString() },
+                { "page_size", Math.Min(pageSize, 50).ToString() }, // Máximo 50
                 { "sign_method", "md5" },
                 { "timestamp", timestamp },
                 { "v", "2.0" }
             };
 
+            // Adiciona parâmetros opcionais
+            if (!string.IsNullOrEmpty(keyword))
+                parameters.Add("keywords", keyword);
+
+            if (!string.IsNullOrEmpty(categoryIds))
+                parameters.Add("category_ids", categoryIds);
+
+            if (!string.IsNullOrEmpty(sort))
+                parameters.Add("sort", sort);
+
+            if (maxSalePrice.HasValue)
+                parameters.Add("max_sale_price", ((int)(maxSalePrice.Value * 100)).ToString()); // Converte para centavos
+
+            if (minSalePrice.HasValue)
+                parameters.Add("min_sale_price", ((int)(minSalePrice.Value * 100)).ToString()); // Converte para centavos
+
             if (!string.IsNullOrEmpty(_trackingId))
-            {
                 parameters.Add("tracking_id", _trackingId);
-            }
 
             // Ordena alfabeticamente e gera assinatura
             var sortedParams = parameters.OrderBy(p => p.Key).ToList();
@@ -69,17 +99,18 @@ public class AliExpressClient : IAliExpressClient
             var queryString = string.Join("&", queryParams);
             var url = $"https://api-sg.aliexpress.com/sync?{queryString}";
 
-            Console.WriteLine($"Requesting: {url}");
+            _logger.LogDebug("Enviando requisição para AliExpress API: {Url}", url);
 
             var response = await _httpClient.GetAsync(url);
             var json = await response.Content.ReadAsStringAsync();
 
-            Console.WriteLine($"Response: {json}");
+            _logger.LogDebug("Resposta recebida da AliExpress API: {Response}", json.Length > 500 ? json.Substring(0, 500) + "..." : json);
 
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"API Error: {response.StatusCode}. Using mock data.");
-                return GetMockProducts(keyword);
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Erro na API AliExpress: Status {StatusCode}, Erro: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"Erro na API AliExpress: {response.StatusCode} - {errorContent}");
             }
 
             var apiResponse = JsonSerializer.Deserialize<AliExpressResponse>(json, new JsonSerializerOptions
@@ -90,7 +121,8 @@ public class AliExpressClient : IAliExpressClient
 
             if (apiResponse?.AliexpressAffiliateProductQueryResponse?.RespResult?.Result?.Products?.Product == null)
             {
-                return GetMockProducts(keyword);
+                _logger.LogWarning("Resposta da API AliExpress não contém produtos para keyword: {Keyword}", keyword);
+                return new List<ScrapedProductDto>();
             }
 
             var products = apiResponse.AliexpressAffiliateProductQueryResponse.RespResult.Result.Products.Product
@@ -98,17 +130,44 @@ public class AliExpressClient : IAliExpressClient
                 {
                     try
                     {
+                        var rating = ParseDecimal(p.EvaluateRate ?? "0") / 20m;
+                        var volumeFromApi = ParseInt(p.Volume ?? "0");
+
+                        // Se a API não retorna volume (comum em APIs de afiliados), estima baseado em rating
+                        var estimatedSales = volumeFromApi > 0 ? volumeFromApi : EstimateSalesFromRating(rating);
+
+                        // Calcular desconto se houver preço original
+                        var originalPrice = ParseDecimal(p.OriginalPrice ?? "0");
+                        var salePrice = ParseDecimal(p.TargetSalePrice ?? p.SalePrice ?? "0");
+                        var discount = p.Discount;
+                        if (string.IsNullOrEmpty(discount) && originalPrice > 0 && salePrice > 0 && salePrice < originalPrice)
+                        {
+                            var discountPercent = ((originalPrice - salePrice) / originalPrice) * 100;
+                            discount = $"{discountPercent:0}%";
+                        }
+
                         return new ScrapedProductDto
                         {
                             ExternalId = p.ProductId?.ToString() ?? Guid.NewGuid().ToString(),
                             Name = p.ProductTitle ?? "Produto sem nome",
-                            SupplierPrice = ParseDecimal(p.TargetSalePrice ?? p.SalePrice ?? p.OriginalPrice ?? "0"),
+                            SupplierPrice = salePrice,
+                            OriginalPrice = originalPrice > 0 ? originalPrice : null,
+                            Discount = discount,
                             ImageUrl = p.ProductMainImageUrl,
                             SupplierUrl = p.ProductUrl,
-                            AverageRating = ParseDecimal(p.EvaluateRate ?? "0") / 20m,
-                            TotalSales = ParseInt(p.Volume ?? "0"),
-                            Rating = ParseDecimal(p.EvaluateRate ?? "0") / 20m,
-                            Orders = ParseInt(p.Volume ?? "0"),
+                            ProductDetailUrl = p.ProductUrl,
+                            ShopUrl = p.ShopUrl,
+                            ShopName = p.ShopName,
+                            PromotionLink = p.PromotionLink,
+                            FirstLevelCategoryId = p.FirstLevelCategoryId?.ToString(),
+                            FirstLevelCategoryName = p.FirstLevelCategoryName,
+                            CommissionRate = ParseDecimal(p.CommissionRate ?? "0"),
+                            ShippingDays = ExtractShippingDays(p.ShipToDays),
+                            HasVideo = !string.IsNullOrEmpty(p.ProductVideoUrl),
+                            AverageRating = rating,
+                            TotalSales = estimatedSales,
+                            Rating = rating,
+                            Orders = estimatedSales,
                             Supplier = "AliExpress"
                         };
                     }
@@ -124,15 +183,22 @@ public class AliExpressClient : IAliExpressClient
             // Filtra produtos relevantes baseado nas palavras-chave principais
             var filteredProducts = FilterRelevantProducts(products, keyword);
 
-            Console.WriteLine($"Produtos retornados pela API: {products.Count}");
-            Console.WriteLine($"Produtos após filtro de relevância: {filteredProducts.Count}");
+            _logger.LogInformation(
+                "Produtos AliExpress - Total: {TotalProducts}, Após filtro: {FilteredProducts}, Keyword: {Keyword}",
+                products.Count,
+                filteredProducts.Count,
+                keyword);
 
             return filteredProducts;
         }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            Console.WriteLine($"Exception: {ex.Message}. Using mock data.");
-            return GetMockProducts(keyword);
+            _logger.LogError(ex, "Exceção ao buscar produtos para keyword: {Keyword}", keyword);
+            throw new HttpRequestException($"Erro inesperado ao buscar produtos: {ex.Message}", ex);
         }
     }
 
@@ -151,14 +217,29 @@ public class AliExpressClient : IAliExpressClient
         sb.Append(_appSecret);
 
         var signString = sb.ToString();
-        Console.WriteLine($"Sign base: {signString.Substring(0, Math.Min(100, signString.Length))}...");
+        _logger.LogDebug("Signature base: {SignatureBase}", signString.Substring(0, Math.Min(100, signString.Length)) + "...");
 
         using var md5 = MD5.Create();
         var hashBytes = md5.ComputeHash(Encoding.UTF8.GetBytes(signString));
         var signature = BitConverter.ToString(hashBytes).Replace("-", "").ToUpper();
 
-        Console.WriteLine($"Signature: {signature}");
+        _logger.LogDebug("Signature gerada: {Signature}", signature);
         return signature;
+    }
+
+    private static int EstimateSalesFromRating(decimal rating)
+    {
+        // Estimativa conservadora: produtos encontrados na busca com bom rating 
+        // provavelmente têm algum volume de vendas
+        return rating switch
+        {
+            >= 4.7m => 800,   // Excelente rating = alta demanda
+            >= 4.5m => 500,   // Muito bom
+            >= 4.2m => 300,   // Bom
+            >= 4.0m => 150,   // Razoável
+            >= 3.5m => 50,    // Aceitável
+            _ => 0            // Baixo rating = sem estimativa
+        };
     }
 
     private static decimal ParseDecimal(string value)
@@ -200,7 +281,7 @@ public class AliExpressClient : IAliExpressClient
         if (!keywordParts.Any())
             return products;
 
-        Console.WriteLine($"Palavras-chave para filtro: {string.Join(", ", keywordParts)}");
+        _logger.LogDebug("Palavras-chave para filtro: {Keywords}", string.Join(", ", keywordParts));
 
         // Calcula score de relevância para cada produto
         var scoredProducts = products.Select(p =>
@@ -222,16 +303,23 @@ public class AliExpressClient : IAliExpressClient
             .ToList();
 
         // Log de produtos filtrados
-        foreach (var sp in scoredProducts.OrderByDescending(s => s.Score).Take(3))
+        if (_logger.IsEnabled(LogLevel.Debug))
         {
-            Console.WriteLine($"  {sp.Product.Name?.Substring(0, Math.Min(50, sp.Product.Name.Length))}... " +
-                            $"(Score: {sp.Score:P0}, Matches: {sp.MatchCount}/{keywordParts.Count})");
+            foreach (var sp in scoredProducts.OrderByDescending(s => s.Score).Take(3))
+            {
+                _logger.LogDebug(
+                    "Produto filtrado: {ProductName}... (Score: {Score:P0}, Matches: {MatchCount}/{TotalKeywords})",
+                    sp.Product.Name?.Substring(0, Math.Min(50, sp.Product.Name.Length)),
+                    sp.Score,
+                    sp.MatchCount,
+                    keywordParts.Count);
+            }
         }
 
         // Se nenhum produto passou no filtro, retorna os 5 melhores por score
         if (!relevantProducts.Any())
         {
-            Console.WriteLine("⚠️ Nenhum produto passou no filtro de relevância mínima. Retornando top 5 por score.");
+            _logger.LogWarning("Nenhum produto passou no filtro de relevância mínima. Retornando top 5 por score");
             return scoredProducts
                 .OrderByDescending(sp => sp.Score)
                 .ThenByDescending(sp => sp.Product.TotalSales)
@@ -310,23 +398,23 @@ public class AliExpressClient : IAliExpressClient
             var queryString = string.Join("&", queryParams);
             var url = $"https://api-sg.aliexpress.com/sync?{queryString}";
 
-            Console.WriteLine($"🔥 Hot Products Request: {url.Substring(0, Math.Min(150, url.Length))}...");
+            _logger.LogDebug("Hot Products Request: {Url}", url.Substring(0, Math.Min(150, url.Length)) + "...");
 
             var response = await _httpClient.GetAsync(url);
             var json = await response.Content.ReadAsStringAsync();
 
-            Console.WriteLine($"🔥 Hot Products Response: {json.Substring(0, Math.Min(500, json.Length))}...");
+            _logger.LogDebug("Hot Products Response: {Response}", json.Substring(0, Math.Min(500, json.Length)) + "...");
 
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"❌ Hot Products API Error: {response.StatusCode}");
+                _logger.LogError("Hot Products API Error: Status {StatusCode}", response.StatusCode);
                 return null;
             }
 
             // Verifica se é uma resposta de erro
             if (json.Contains("error_response"))
             {
-                Console.WriteLine($"❌ Hot Products API retornou erro: {json}");
+                _logger.LogError("Hot Products API retornou erro: {Response}", json);
                 return null;
             }
 
@@ -337,14 +425,18 @@ public class AliExpressClient : IAliExpressClient
             });
 
             var productsCount = apiResponse?.RespResult?.Result?.Products?.Count ?? 0;
-            Console.WriteLine($"✅ Hot Products retornados: {productsCount}");
-            Console.WriteLine($"📊 Total records: {apiResponse?.RespResult?.Result?.TotalRecordCount}, Page {apiResponse?.RespResult?.Result?.CurrentPageNo}/{apiResponse?.RespResult?.Result?.TotalPageNo}");
+            _logger.LogInformation(
+                "Hot Products retornados: {ProductsCount}, Total records: {TotalRecords}, Page {CurrentPage}/{TotalPages}",
+                productsCount,
+                apiResponse?.RespResult?.Result?.TotalRecordCount,
+                apiResponse?.RespResult?.Result?.CurrentPageNo,
+                apiResponse?.RespResult?.Result?.TotalPageNo);
 
             return apiResponse;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Exception ao buscar Hot Products: {ex.Message}");
+            _logger.LogError(ex, "Exceção ao buscar Hot Products para keyword: {Keyword}", keyword);
             return null;
         }
     }
@@ -386,14 +478,14 @@ public class AliExpressClient : IAliExpressClient
             var queryString = string.Join("&", queryParams);
             var url = $"https://api-sg.aliexpress.com/sync?{queryString}";
 
-            Console.WriteLine($"📂 Categories Request: {url.Substring(0, Math.Min(150, url.Length))}...");
+            _logger.LogDebug("Categories Request: {Url}", url.Substring(0, Math.Min(150, url.Length)) + "...");
 
             var response = await _httpClient.GetAsync(url);
             var json = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"❌ Categories API Error: {response.StatusCode}");
+                _logger.LogError("Categories API Error: Status {StatusCode}", response.StatusCode);
                 return null;
             }
 
@@ -405,48 +497,27 @@ public class AliExpressClient : IAliExpressClient
 
             var categoriesCount = apiResponse?.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.Categories?.Category?.Count ?? 0;
             var totalCount = apiResponse?.AliexpressAffiliateCategoryGetResponse?.RespResult?.Result?.TotalResultCount ?? 0;
-            Console.WriteLine($"✅ Categorias retornadas: {categoriesCount}/{totalCount}");
+            _logger.LogInformation("Categorias retornadas: {CategoriesCount}/{TotalCount}", categoriesCount, totalCount);
 
             return apiResponse;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Exception ao buscar Categorias: {ex.Message}");
+            _logger.LogError(ex, "Exceção ao buscar Categorias");
             return null;
         }
     }
 
-    private List<ScrapedProductDto> GetMockProducts(string keyword)
+    // Método auxiliar para extrair dias de envio
+    private static int? ExtractShippingDays(string? shipToDays)
     {
-        return new List<ScrapedProductDto>
-        {
-            new()
-            {
-                ExternalId = "mock-001",
-                Name = $"Produto Mock 1 - {keyword}",
-                Supplier = "AliExpress",
-                SupplierPrice = 15.99m,
-                ImageUrl = "https://via.placeholder.com/300x300?text=Produto+1",
-                SupplierUrl = "https://aliexpress.com/item/mock-001",
-                AverageRating = 4.5m,
-                Rating = 4.5m,
-                TotalSales = 1523,
-                Orders = 1523
-            },
-            new()
-            {
-                ExternalId = "mock-002",
-                Name = $"Produto Mock 2 - {keyword}",
-                Supplier = "AliExpress",
-                SupplierPrice = 22.50m,
-                ImageUrl = "https://via.placeholder.com/300x300?text=Produto+2",
-                SupplierUrl = "https://aliexpress.com/item/mock-002",
-                AverageRating = 4.8m,
-                Rating = 4.8m,
-                TotalSales = 3847,
-                Orders = 3847
-            }
-        };
+        if (string.IsNullOrWhiteSpace(shipToDays)) return null;
+
+        // Extrai números do texto "ship to RU in 7 days"
+        var numbers = new string(shipToDays.Where(char.IsDigit).ToArray());
+        if (string.IsNullOrEmpty(numbers)) return null;
+
+        return int.TryParse(numbers, out var days) ? days : null;
     }
 }
 
@@ -512,6 +583,33 @@ public class Product
 
     [JsonPropertyName("original_price")]
     public string? OriginalPrice { get; set; }
+
+    [JsonPropertyName("discount")]
+    public string? Discount { get; set; }
+
+    [JsonPropertyName("shop_url")]
+    public string? ShopUrl { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("promotion_link")]
+    public string? PromotionLink { get; set; }
+
+    [JsonPropertyName("first_level_category_id")]
+    public long? FirstLevelCategoryId { get; set; }
+
+    [JsonPropertyName("first_level_category_name")]
+    public string? FirstLevelCategoryName { get; set; }
+
+    [JsonPropertyName("commission_rate")]
+    public string? CommissionRate { get; set; }
+
+    [JsonPropertyName("ship_to_days")]
+    public string? ShipToDays { get; set; }
+
+    [JsonPropertyName("product_video_url")]
+    public string? ProductVideoUrl { get; set; }
 }
 
 // Classes para Hot Products API
@@ -623,7 +721,7 @@ public class AliHotProduct
     public string? ShopName { get; set; }
 
     [JsonPropertyName("first_level_category_id")]
-    public string? FirstLevelCategoryId { get; set; }
+    public long? FirstLevelCategoryId { get; set; }
 
     [JsonPropertyName("first_level_category_name")]
     public string? FirstLevelCategoryName { get; set; }
@@ -636,6 +734,24 @@ public class AliHotProduct
 
     [JsonPropertyName("platform_product_type")]
     public string? PlatformProductType { get; set; }
+
+    [JsonPropertyName("ship_to_days")]
+    public string? ShipToDays { get; set; }
+
+    [JsonPropertyName("promotion_link")]
+    public string? PromotionLink { get; set; }
+
+    [JsonPropertyName("product_video_url")]
+    public string? ProductVideoUrl { get; set; }
+
+    [JsonPropertyName("relevant_market_commission_rate")]
+    public string? RelevantMarketCommissionRate { get; set; }
+
+    [JsonPropertyName("app_sale_price")]
+    public string? AppSalePrice { get; set; }
+
+    [JsonPropertyName("app_sale_price_currency")]
+    public string? AppSalePriceCurrency { get; set; }
 }
 
 // Classes para Category API

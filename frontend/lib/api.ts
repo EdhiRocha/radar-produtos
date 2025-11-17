@@ -4,6 +4,7 @@ import type {
   AnalysisConfig,
   RunAnalysisRequest,
   PaginatedProducts,
+  Category,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
@@ -91,6 +92,13 @@ export const configApi = {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  },
+};
+
+// Category endpoints
+export const categoryApi = {
+  getAll: async (): Promise<Category[]> => {
+    return fetchApi<Category[]>("/api/categories");
   },
 };
 
