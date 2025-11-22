@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# IDEs
+.vs
+.vscode
+.idea
+
+# Build outputs
+bin/
+obj/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

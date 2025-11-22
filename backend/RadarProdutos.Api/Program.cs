@@ -9,9 +9,6 @@ using RadarProdutos.Infrastructure.Scraper;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuration
-builder.Configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
-
 // Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -95,9 +92,5 @@ app.UseRouting();
 app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 
 app.MapControllers();
-
-// Garantir que sempre use a porta 5001
-app.Urls.Clear();
-app.Urls.Add("http://localhost:5001");
 
 app.Run();

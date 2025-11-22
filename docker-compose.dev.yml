@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: radar-produtos-db
+    environment:
+      POSTGRES_DB: radar_produtos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - radar-network
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: radar-produtos-api
+    ports:
+      - "5000:5000"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: "http://+:5000"
+      ASPNETCORE_HTTP_PORTS: ""
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=radar_produtos;Username=postgres;Password=postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/bin
+      - /app/obj
+      - /app/RadarProdutos.Api/bin
+      - /app/RadarProdutos.Api/obj
+      - /app/RadarProdutos.Application/bin
+      - /app/RadarProdutos.Application/obj
+      - /app/RadarProdutos.Domain/bin
+      - /app/RadarProdutos.Domain/obj
+      - /app/RadarProdutos.Infrastructure/bin
+      - /app/RadarProdutos.Infrastructure/obj
+    networks:
+      - radar-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: radar-produtos-front
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:5000"
+      NODE_ENV: development
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - /app/.next
+    networks:
+      - radar-network
+    command: sh -c "pnpm install && pnpm dev"
+
+volumes:
+  postgres_data:
+    driver: local
+  frontend_node_modules:
+    driver: local
+
+networks:
+  radar-network:
+    driver: bridge
